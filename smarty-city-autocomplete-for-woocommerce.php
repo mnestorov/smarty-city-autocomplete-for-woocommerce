@@ -46,7 +46,7 @@ if (!function_exists('smarty_ca_override_checkout_fields')) {
             'label'     => __('City', 'woocommerce'),
             'required'  => true,
             'class'     => array('form-row-wide', 'smarty-select2-city'),
-            'options'   => array('' => __('Type to search...', 'woocommerce')),
+            'options'   => array('' => __('', 'woocommerce')),
             'priority'  => 45,
         );
 
