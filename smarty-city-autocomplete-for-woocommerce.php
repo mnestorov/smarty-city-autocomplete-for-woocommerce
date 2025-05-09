@@ -42,15 +42,12 @@ if (!function_exists('smarty_ca_override_checkout_fields')) {
         $fields['billing']['billing_postcode']['class'][] = 'smarty-hidden';
 
         $fields['billing']['billing_city'] = array(
-            'type'              => 'text',
-            'label'             => __('City', 'woocommerce'),
-            'required'          => true,
-            'class'             => array('form-row-wide'),
-            'priority'          => 45, // lower than address_1 (default 50)
-            'custom_attributes' => array(
-                'autocomplete' => 'off',
-                'id'           => 'smarty-autocomplete-city'
-            ),
+            'type'      => 'select',
+            'label'     => __('City', 'woocommerce'),
+            'required'  => true,
+            'class'     => array('form-row-wide', 'smarty-select2-city'),
+            'options'   => array('' => __('Type to search...', 'woocommerce')),
+            'priority'  => 45,
         );
 
         // Re-order fields based on priority
@@ -90,12 +87,17 @@ if (!function_exists('smarty_ca_enqueue_scripts')) {
         $enabled = smarty_ca_get_enabled_countries();
         if (!in_array($country, $enabled)) return;
 
-        wp_enqueue_script('jquery-ui-autocomplete');
-        wp_enqueue_script('smarty-city-autocomplete', plugin_dir_url(__FILE__) . 'js/smarty-ca-public.js', ['jquery', 'jquery-ui-autocomplete'], '1.1', true);
-        wp_localize_script('smarty-city-autocomplete', 'smartyCityAjax', [
-            'ajax_url' => admin_url('admin-ajax.php'),
-            'country' => $country,
-        ]);
+        wp_enqueue_style('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css');
+        wp_enqueue_script('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js', ['jquery'], '4.1.0', true);
+
+        wp_enqueue_script('smarty-city-autocomplete', plugin_dir_url(__FILE__) . 'js/smarty-ca-public.js', ['jquery', 'select2'], '1.1', true);
+        wp_localize_script(
+            'smarty-city-autocomplete', 
+            'smartyCityAjax', [
+                'ajax_url' => admin_url('admin-ajax.php'),
+                'country' => $country,
+            ]
+        );
     }
     add_action('wp_enqueue_scripts', 'smarty_ca_enqueue_scripts');
 }

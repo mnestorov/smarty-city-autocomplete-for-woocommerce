@@ -1,46 +1,42 @@
 jQuery(function($) {
-    let cache = {};
-    let lastResults = [];
-    const $input = $('#smarty-autocomplete-city');
     const $postcode = $('input[name="billing_postcode"]');
+    const $select = $('select[name="billing_city"]');
 
-    if (!$input.length) return;
-
-    $input.autocomplete({
-        minLength: 2,
-        delay: 150,
-        source: function(request, response) {
-            const term = request.term.toLowerCase();
-
-            if (cache[term]) {
-                lastResults = cache[term];
-                response(cache[term].map(c => c.city));
-                return;
+    if ($select.length) {
+        $select.select2({
+            placeholder: "Start typing city name...",
+            minimumInputLength: 2,
+            width: '100%',
+            ajax: {
+                url: smartyCityAjax.ajax_url,
+                dataType: 'json',
+                delay: 250,
+                data: function (params) {
+                    return {
+                        action: 'smarty_get_city_suggestions',
+                        term: params.term,
+                        country: smartyCityAjax.country
+                    };
+                },
+                processResults: function (data) {
+                    return {
+                        results: data.map(function (item) {
+                            return {
+                                id: item.city,
+                                text: item.city,
+                                postal_code: item.postal_code
+                            };
+                        })
+                    };
+                }
             }
+        });
 
-            $.get(smartyCityAjax.ajax_url, {
-                action: 'smarty_get_city_suggestions',
-                term: term,
-                country: smartyCityAjax.country
-            }, function(data) {
-                cache[term] = data;
-                lastResults = data;
-                response(data.map(c => c.city));
-            });
-        },
-        select: function(e, ui) {
-            const selected = lastResults.find(c => c.city === ui.item.value);
-            if (selected) {
+        $select.on('select2:select', function(e) {
+            const selected = e.params.data;
+            if (selected && selected.postal_code) {
                 $postcode.val(selected.postal_code).trigger('change');
             }
-        }
-    });
-
-    $input.on('change blur', function() {
-        const current = $input.val();
-        const match = lastResults.find(c => c.city === current);
-        if (!match) {
-            $postcode.val('').trigger('change');
-        }
-    });
+        });
+    }
 });
