@@ -31,7 +31,7 @@ if (!function_exists('smarty_ca_override_checkout_fields')) {
      */
     function smarty_ca_override_checkout_fields($fields) {
         $country = WC()->customer->get_billing_country() ?: 'BG';
-        $enabled_countries = get_option('smarty_ca_enabled_countries', []);
+        $enabled_countries = smarty_ca_get_enabled_countries();
 
         if (!in_array($country, $enabled_countries)) {
             return $fields; // Don’t modify fields if country not enabled
@@ -42,12 +42,21 @@ if (!function_exists('smarty_ca_override_checkout_fields')) {
         $fields['billing']['billing_postcode']['class'][] = 'smarty-hidden';
 
         $fields['billing']['billing_city'] = array(
-            'type' => 'text',
-            'label' => __('City / Village', 'woocommerce'),
-            'required' => true,
-            'class' => array('form-row-wide'),
-            'custom_attributes' => array('autocomplete' => 'off', 'id' => 'smarty-autocomplete-city'),
+            'type'              => 'text',
+            'label'             => __('City', 'woocommerce'),
+            'required'          => true,
+            'class'             => array('form-row-wide'),
+            'priority'          => 45, // lower than address_1 (default 50)
+            'custom_attributes' => array(
+                'autocomplete' => 'off',
+                'id'           => 'smarty-autocomplete-city'
+            ),
         );
+
+        // Re-order fields based on priority
+        uksort($fields['billing'], function($a, $b) use ($fields) {
+            return ($fields['billing'][$a]['priority'] ?? 10) <=> ($fields['billing'][$b]['priority'] ?? 10);
+        });
 
         return $fields;
     }
@@ -78,7 +87,7 @@ if (!function_exists('smarty_ca_enqueue_scripts')) {
         if (!is_checkout()) return;
 
         $country = WC()->customer->get_billing_country() ?: 'BG';
-        $enabled = get_option('smarty_ca_enabled_countries', []);
+        $enabled = smarty_ca_get_enabled_countries();
         if (!in_array($country, $enabled)) return;
 
         wp_enqueue_script('jquery-ui-autocomplete');
@@ -105,7 +114,7 @@ if (!function_exists('smarty_ca_get_city_suggestions')) {
 
         if (strlen($term) < 2) wp_send_json([]);
 
-        $enabled = get_option('smarty_ca_enabled_countries', []);
+        $enabled = smarty_ca_get_enabled_countries();
         if (!in_array($country, $enabled)) wp_send_json([]);
 
         $file_path = plugin_dir_path(__FILE__) . 'data/' . $country . '.txt';
@@ -178,12 +187,17 @@ if (!function_exists('smarty_ca_register_settings')) {
     add_action('admin_init', 'smarty_ca_register_settings');
 }
 
+function smarty_ca_get_enabled_countries() {
+    $enabled = get_option('smarty_ca_enabled_countries');
+    return is_array($enabled) ? $enabled : [];
+}
+
 if (!function_exists('smarty_ca_country_checkboxes')) {
     /**
      * Render checkboxes for each TXT file in /data.
      */
     function smarty_ca_country_checkboxes() {
-        $enabled = get_option('smarty_ca_enabled_countries', []);
+        $enabled = smarty_ca_get_enabled_countries();
         $files = glob(plugin_dir_path(__FILE__) . 'data/*.txt');
 
         if (!$files) {
