@@ -22,10 +22,11 @@ jQuery(function($) {
             processResults: function (data) {
                 return {
                     results: data.map(function (item) {
+                        const cityOnly = item.city.split(' / ')[0].trim();
                         return {
                             id: item.city,
-                            text: `${item.city} [${item.postal_code}]`,
-                            city: item.city,
+                            text: `${cityOnly} [${item.postal_code}]`,
+                            city: cityOnly,
                             postal_code: item.postal_code
                         };
                     })
@@ -43,7 +44,7 @@ jQuery(function($) {
     $select.on('select2:select', function(e) {
         const selected = e.params.data;
         if (selected && selected.postal_code) {
-            $postcode.val(selected.postal_code).trigger('change');
+            $('input[name="billing_postcode"]').val(selected.postal_code).trigger('change');
         }
     });
 });

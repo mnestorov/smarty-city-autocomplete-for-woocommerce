@@ -19,6 +19,8 @@ if (!defined('WPINC')) {
 	die;
 }
 
+// ==================== FRONTEND FIELD OVERRIDE ==================== //
+
 if (!function_exists('smarty_ca_override_checkout_fields')) {
     /**
      * Override WooCommerce checkout fields:
@@ -34,7 +36,7 @@ if (!function_exists('smarty_ca_override_checkout_fields')) {
         $enabled_countries = smarty_ca_get_enabled_countries();
 
         if (!in_array($country, $enabled_countries)) {
-            return $fields; // Don’t modify fields if country not enabled
+            return $fields;
         }
 
         $fields['billing']['billing_postcode']['required'] = false;
@@ -50,7 +52,6 @@ if (!function_exists('smarty_ca_override_checkout_fields')) {
             'priority'  => 45,
         );
 
-        // Re-order fields based on priority
         uksort($fields['billing'], function($a, $b) use ($fields) {
             return ($fields['billing'][$a]['priority'] ?? 10) <=> ($fields['billing'][$b]['priority'] ?? 10);
         });
@@ -72,6 +73,8 @@ if (!function_exists('smarty_ca_hidden_postcode_input')) {
     }
     add_action('woocommerce_after_checkout_billing_form', 'smarty_ca_hidden_postcode_input');
 }
+
+// ==================== JS / ASSETS ==================== //
 
 if (!function_exists('smarty_ca_enqueue_scripts')) {
     /**
@@ -101,6 +104,8 @@ if (!function_exists('smarty_ca_enqueue_scripts')) {
     }
     add_action('wp_enqueue_scripts', 'smarty_ca_enqueue_scripts');
 }
+
+// ==================== AJAX ==================== //
 
 if (!function_exists('smarty_ca_get_city_suggestions')) {
     /**
@@ -133,7 +138,7 @@ if (!function_exists('smarty_ca_get_city_suggestions')) {
                     $parts = explode("\t", $line);
                     if (count($parts) < 3) continue;
                     [$cc, $zip, $city] = [$parts[0], $parts[1], $parts[2]];
-                    $cities[] = ['city' => $city, 'postal_code' => $zip];
+                    $cities[] = ['city' => trim($city), 'postal_code' => $zip];
                 }
                 fclose($handle);
                 set_transient($cache_key, $cities, DAY_IN_SECONDS);
@@ -141,7 +146,7 @@ if (!function_exists('smarty_ca_get_city_suggestions')) {
         }
 
         $filtered = array_filter($cities, function ($entry) use ($term) {
-            return stripos($entry['city'], $term) !== false;
+            return strpos(mb_strtolower($entry['city']), mb_strtolower($term)) !== false;
         });
 
         wp_send_json(array_slice(array_values($filtered), 0, 10));
@@ -149,6 +154,99 @@ if (!function_exists('smarty_ca_get_city_suggestions')) {
     add_action('wp_ajax_smarty_get_city_suggestions', 'smarty_ca_get_city_suggestions');
     add_action('wp_ajax_nopriv_smarty_get_city_suggestions', 'smarty_ca_get_city_suggestions');
 }
+
+// ==================== SANITIZE CITY ==================== //
+
+/**
+ * Clean city name before saving to the order.
+ *
+ * @param string $city
+ * @return string
+ */
+function smarty_ca_clean_city_on_checkout($city) {
+    if (strpos($city, ' / ') !== false) {
+        $city = explode(' / ', $city)[0];
+    }
+    return trim($city);
+}
+
+add_action('woocommerce_checkout_create_order', function($order, $data) {
+    if (!empty($data['billing']['billing_city'])) {
+        $order->set_billing_city(smarty_ca_clean_city_on_checkout($data['billing']['billing_city']));
+    }
+    if (!empty($data['shipping']['shipping_city'])) {
+        $order->set_shipping_city(smarty_ca_clean_city_on_checkout($data['shipping']['shipping_city']));
+    }
+}, 20, 2);
+
+add_filter('woocommerce_order_formatted_billing_address', function($address, $order) {
+    if (!empty($address['city'])) {
+        $address['city'] = smarty_ca_clean_city_on_checkout($address['city']);
+    }
+    return $address;
+}, 10, 2);
+
+add_filter('woocommerce_order_formatted_shipping_address', function($address, $order) {
+    if (!empty($address['city'])) {
+        $address['city'] = smarty_ca_clean_city_on_checkout($address['city']);
+    }
+    return $address;
+}, 10, 2);
+
+/**
+ * Force-clean the city fields before they are saved into order meta.
+ *
+ * @param int $order_id
+ */
+add_action('woocommerce_checkout_update_order_meta', function($order_id) {
+    $order = wc_get_order($order_id);
+
+    $billing_city = $order->get_billing_city();
+    if ($billing_city && strpos($billing_city, ' / ') !== false) {
+        $clean_billing_city = smarty_ca_clean_city_on_checkout($billing_city);
+        update_post_meta($order_id, '_billing_city', $clean_billing_city);
+    }
+
+    $shipping_city = $order->get_shipping_city();
+    if ($shipping_city && strpos($shipping_city, ' / ') !== false) {
+        $clean_shipping_city = smarty_ca_clean_city_on_checkout($shipping_city);
+        update_post_meta($order_id, '_shipping_city', $clean_shipping_city);
+    }
+});
+
+// Ensure city is cleaned in $_POST before WC saves to DB
+add_filter('woocommerce_process_checkout_field_billing_city', 'smarty_ca_clean_city_on_checkout');
+add_filter('woocommerce_process_checkout_field_shipping_city', 'smarty_ca_clean_city_on_checkout');
+
+add_filter('woocommerce_checkout_posted_data', function($data) {
+    if (!empty($data['billing_city'])) {
+        $data['billing_city'] = smarty_ca_clean_city_on_checkout($data['billing_city']);
+    }
+
+    if (!empty($data['shipping_city'])) {
+        $data['shipping_city'] = smarty_ca_clean_city_on_checkout($data['shipping_city']);
+    }
+
+    return $data;
+});
+
+/**
+ * Final cleanup after WooCommerce saves the meta.
+ * This ensures / translations are removed from DB after save.
+ *
+ * @param int $order_id
+ */
+add_action('woocommerce_checkout_order_processed', function($order_id) {
+    $billing_city = get_post_meta($order_id, '_billing_city', true);
+    if ($billing_city && strpos($billing_city, ' / ') !== false) {
+        update_post_meta($order_id, '_billing_city', smarty_ca_clean_city_on_checkout($billing_city));
+    }
+
+    $shipping_city = get_post_meta($order_id, '_shipping_city', true);
+    if ($shipping_city && strpos($shipping_city, ' / ') !== false) {
+        update_post_meta($order_id, '_shipping_city', smarty_ca_clean_city_on_checkout($shipping_city));
+    }
+}, 100); // priority 100 ensures it runs AFTER Woo saves meta
 
 // ==================== ADMIN SETTINGS ==================== //
 
