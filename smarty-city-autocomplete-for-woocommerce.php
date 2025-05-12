@@ -34,6 +34,7 @@ if (!function_exists('smarty_ca_override_checkout_fields')) {
     function smarty_ca_override_checkout_fields($fields) {
         $country = WC()->customer->get_billing_country() ?: 'BG';
         $enabled_countries = smarty_ca_get_enabled_countries();
+        $priority = get_option('smarty_ca_city_priority', 45);
 
         if (!in_array($country, $enabled_countries)) {
             return $fields;
@@ -49,7 +50,7 @@ if (!function_exists('smarty_ca_override_checkout_fields')) {
             'required'  => true,
             'class'     => array('form-row-wide', 'smarty-select2-city'),
             'options'   => array('' => __('', 'woocommerce')),
-            'priority'  => 45,
+            'priority'  => (int) $priority,
         );
 
         uksort($fields['billing'], function($a, $b) use ($fields) {
@@ -76,14 +77,26 @@ if (!function_exists('smarty_ca_hidden_postcode_input')) {
 
 // ==================== JS / ASSETS ==================== //
 
-if (!function_exists('smarty_ca_enqueue_scripts')) {
-    /**
-     * Enqueue JavaScript dependencies for city autocomplete on WooCommerce checkout.
-     *
-     * @since 1.0.0
-     * @return void
-     */
-    function smarty_ca_enqueue_scripts() {
+if (!function_exists('smarty_ca_enqueue_admin_scripts')) {
+    function smarty_ca_enqueue_admin_scripts($hook) {
+     
+        wp_enqueue_style('smarty-ca-admin-css', plugin_dir_url(__FILE__) . 'css/smarty-ca-admin.css', array(), '1.0.0');
+        wp_enqueue_script('smarty-ca-admin-js', plugin_dir_url(__FILE__) . 'js/smarty-ca-admin.js', ['jquery'], '1.0.0', true);
+
+        wp_localize_script(
+            'smarty-ca-admin-js',
+            'smartyCityAutocomplete',
+            [
+                'ajaxUrl' => admin_url('admin-ajax.php'),
+                'nonce'    => wp_create_nonce('smarty_ca_nonce'),
+            ]
+        );
+    }
+    add_action('admin_enqueue_scripts', 'smarty_ca_enqueue_admin_scripts');
+}
+
+if (!function_exists('smarty_ca_enqueue_public_scripts')) {
+    function smarty_ca_enqueue_public_scripts() {
         if (!is_checkout()) return;
 
         $country = WC()->customer->get_billing_country() ?: 'BG';
@@ -93,16 +106,19 @@ if (!function_exists('smarty_ca_enqueue_scripts')) {
         wp_enqueue_style('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css');
         wp_enqueue_script('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js', ['jquery'], '4.1.0', true);
 
-        wp_enqueue_script('smarty-city-autocomplete', plugin_dir_url(__FILE__) . 'js/smarty-ca-public.js', ['jquery', 'select2'], '1.1', true);
-        wp_localize_script(
-            'smarty-city-autocomplete', 
-            'smartyCityAjax', [
-                'ajax_url' => admin_url('admin-ajax.php'),
-                'country' => $country,
+        wp_enqueue_script('smarty-ca-public-js', plugin_dir_url(__FILE__) . 'js/smarty-ca-public.js', ['jquery', 'select2'], '1.1', true);
+
+       wp_localize_script(
+            'smarty-ca-public-js',
+            'smartyCityAjax',
+            [
+                'ajaxUrl' => admin_url('admin-ajax.php'),
+                'country'  => $country,
+                'nonce'    => wp_create_nonce('smarty_ca_nonce'),
             ]
         );
     }
-    add_action('wp_enqueue_scripts', 'smarty_ca_enqueue_scripts');
+    add_action('wp_enqueue_scripts', 'smarty_ca_enqueue_public_scripts');
 }
 
 // ==================== AJAX ==================== //
@@ -257,8 +273,8 @@ if (!function_exists('smarty_ca_register_menu')) {
     function smarty_ca_register_menu() {
         add_submenu_page(
             'woocommerce',
-            __('City Autocomplete Settings', 'woocommerce'),
-            __('City Autocomplete', 'woocommerce'),
+            __('City Autocomplete Settings', 'smarty-city-autocomplete'),
+            __('City Autocomplete', 'smarty-city-autocomplete'),
             'manage_options',
             'smarty-ca-settings',
             'smarty_ca_render_settings_page'
@@ -273,13 +289,27 @@ if (!function_exists('smarty_ca_register_settings')) {
      */
     function smarty_ca_register_settings() {
         register_setting('smarty_ca_options', 'smarty_ca_enabled_countries');
+        register_setting('smarty_ca_options', 'smarty_ca_city_priority', [
+            'type' => 'integer',
+            'sanitize_callback' => function($val) {
+                return max(0, min(999, (int)$val));
+            },
+        ]);
 
         add_settings_section('smarty_ca_main_section', '', null, 'smarty-ca-settings');
 
         add_settings_field(
             'smarty_ca_enabled_countries',
-            __('Enabled Countries', 'woocommerce'),
+            __('Enabled Countries', 'smarty-city-autocomplete'),
             'smarty_ca_country_checkboxes',
+            'smarty-ca-settings',
+            'smarty_ca_main_section'
+        );
+
+        add_settings_field(
+            'smarty_ca_city_priority',
+            __('City Field Priority', 'smarty-city-autocomplete'),
+            'smarty_ca_city_priority_input',
             'smarty-ca-settings',
             'smarty_ca_main_section'
         );
@@ -287,9 +317,19 @@ if (!function_exists('smarty_ca_register_settings')) {
     add_action('admin_init', 'smarty_ca_register_settings');
 }
 
-function smarty_ca_get_enabled_countries() {
-    $enabled = get_option('smarty_ca_enabled_countries');
-    return is_array($enabled) ? $enabled : [];
+if (!function_exists('smarty_ca_get_enabled_countries')) {
+    function smarty_ca_get_enabled_countries() {
+        $enabled = get_option('smarty_ca_enabled_countries');
+        return is_array($enabled) ? $enabled : [];
+    }
+}
+
+if (!function_exists('smarty_ca_city_priority_input')) {
+    function smarty_ca_city_priority_input() {
+        $value = get_option('smarty_ca_city_priority', 45);
+        echo "<input type='number' name='smarty_ca_city_priority' value='" . esc_attr($value) . "' min='0' max='999' />";
+        echo "<p class='description'>" . __('Lower numbers show earlier. Default: 45', 'smarty-city-autocomplete') . "</p>";
+    }
 }
 
 if (!function_exists('smarty_ca_country_checkboxes')) {
@@ -320,15 +360,107 @@ if (!function_exists('smarty_ca_render_settings_page')) {
     function smarty_ca_render_settings_page() {
         ?>
         <div class="wrap">
-            <h1><?php esc_html_e('City Autocomplete | Settings', 'woocommerce'); ?></h1>
-            <form method="post" action="options.php">
-                <?php
-                settings_fields('smarty_ca_options');
-                do_settings_sections('smarty-ca-settings');
-                submit_button();
-                ?>
-            </form>
+            <h1><?php esc_html_e('City Autocomplete | Settings', 'smarty-city-autocomplete'); ?></h1>
+            <div id="smarty-ca-settings-container">
+                <div>
+                    <form method="post" action="options.php">
+                        <?php
+                        settings_fields('smarty_ca_options');
+                        do_settings_sections('smarty-ca-settings');
+                        submit_button();
+                        ?>
+                    </form>
+                </div>
+                <div id="smarty-ca-tabs-container">
+                    <div>
+                        <h2 class="smarty-ca-nav-tab-wrapper">
+                            <a href="#smarty-ca-documentation" class="smarty-ca-nav-tab smarty-ca-nav-tab-active"><?php esc_html_e('Documentation', 'smarty-city-autocomplete'); ?></a>
+                            <a href="#smarty-ca-changelog" class="smarty-ca-nav-tab"><?php esc_html_e('Changelog', 'smarty-city-autocomplete'); ?></a>
+                        </h2>
+                        <div id="smarty-ca-documentation" class="smarty-ca-tab-content active">
+                            <div class="smarty-ca-view-more-container">
+                                <p><?php esc_html_e('Click "View More" to load the plugin documentation.', 'smarty-city-autocomplete'); ?></p>
+                                <button id="smarty-ca-load-readme-btn" class="button button-primary">
+                                    <?php esc_html_e('View More', 'smarty-city-autocomplete'); ?>
+                                </button>
+                            </div>
+                            <div id="smarty-ca-readme-content" style="margin-top: 20px;"></div>
+                        </div>
+                        <div id="smarty-ca-changelog" class="smarty-ca-tab-content">
+                            <div class="smarty-ca-view-more-container">
+                                <p><?php esc_html_e('Click "View More" to load the plugin changelog.', 'smarty-city-autocomplete'); ?></p>
+                                <button id="smarty-ca-load-changelog-btn" class="button button-primary">
+                                    <?php esc_html_e('View More', 'smarty-city-autocomplete'); ?>
+                                </button>
+                            </div>
+                            <div id="smarty-ca-changelog-content" style="margin-top: 20px;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
         <?php
     }
+}
+
+if (!function_exists('smarty_ca_load_readme')) {
+    /**
+     * AJAX handler to load and parse the README.md content.
+     */
+    function smarty_ca_load_readme() {
+        check_ajax_referer('smarty_ca_nonce', 'nonce');
+    
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('You do not have sufficient permissions.');
+        }
+    
+        $readme_path = plugin_dir_path(__FILE__) . 'README.md';
+        if (file_exists($readme_path)) {
+            // Include Parsedown library
+            if (!class_exists('Parsedown')) {
+                require_once plugin_dir_path(__FILE__) . 'libs/Parsedown.php';
+            }
+    
+            $parsedown = new Parsedown();
+            $markdown_content = file_get_contents($readme_path);
+            $html_content = $parsedown->text($markdown_content);
+    
+            // Remove <img> tags from the content
+            $html_content = preg_replace('/<img[^>]*>/', '', $html_content);
+    
+            wp_send_json_success($html_content);
+        } else {
+            wp_send_json_error('README.md file not found.');
+        }
+    }    
+    add_action('wp_ajax_smarty_ca_load_readme', 'smarty_ca_load_readme');
+}
+
+if (!function_exists('smarty_ca_load_changelog')) {
+    /**
+     * AJAX handler to load and parse the CHANGELOG.md content.
+     */
+    function smarty_ca_load_changelog() {
+        check_ajax_referer('smarty_ca_nonce', 'nonce');
+    
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('You do not have sufficient permissions.');
+        }
+    
+        $changelog_path = plugin_dir_path(__FILE__) . 'CHANGELOG.md';
+        if (file_exists($changelog_path)) {
+            if (!class_exists('Parsedown')) {
+                require_once plugin_dir_path(__FILE__) . 'libs/Parsedown.php';
+            }
+    
+            $parsedown = new Parsedown();
+            $markdown_content = file_get_contents($changelog_path);
+            $html_content = $parsedown->text($markdown_content);
+    
+            wp_send_json_success($html_content);
+        } else {
+            wp_send_json_error('CHANGELOG.md file not found.');
+        }
+    }
+    add_action('wp_ajax_smarty_ca_load_changelog', 'smarty_ca_load_changelog');
 }

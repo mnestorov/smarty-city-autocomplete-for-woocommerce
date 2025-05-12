@@ -9,7 +9,7 @@ jQuery(function($) {
         minimumInputLength: 2,
         width: '100%',
         ajax: {
-            url: smartyCityAjax.ajax_url,
+            url: smartyCityAjax.ajaxUrl,
             dataType: 'json',
             delay: 250,
             data: function (params) {
