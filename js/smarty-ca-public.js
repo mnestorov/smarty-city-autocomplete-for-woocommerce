@@ -8,6 +8,20 @@ jQuery(function($) {
         placeholder: "",
         minimumInputLength: 2,
         width: '100%',
+        language: {
+            inputTooShort: function() {
+                return smartyCityAjax.inputTooShort;
+            },
+            searching: function() {
+                return smartyCityAjax.searching;
+            },
+            noResults: function() {
+                return smartyCityAjax.noResults;
+            },
+            loadingMore: function() {
+                return smartyCityAjax.loadingMore;
+            }
+        },
         ajax: {
             url: smartyCityAjax.ajaxUrl,
             dataType: 'json',

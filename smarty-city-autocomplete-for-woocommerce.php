@@ -8,7 +8,7 @@
  * Author URI:              https://github.com/mnestorov
  * License:                 GPL-2.0+
  * License URI:             http://www.gnu.org/licenses/gpl-2.0.txt
- * Text Domain:             smarty-google-feed-generator
+ * Text Domain:             smarty-city-autocomplete
  * WC requires at least:    3.5.0
  * WC tested up to:         9.6.0
  * Requires Plugins:        woocommerce
@@ -88,7 +88,7 @@ if (!function_exists('smarty_ca_enqueue_admin_scripts')) {
             'smartyCityAutocomplete',
             [
                 'ajaxUrl' => admin_url('admin-ajax.php'),
-                'nonce'    => wp_create_nonce('smarty_ca_nonce'),
+                'nonce'   => wp_create_nonce('smarty_ca_nonce'),
             ]
         );
     }
@@ -112,9 +112,13 @@ if (!function_exists('smarty_ca_enqueue_public_scripts')) {
             'smarty-ca-public-js',
             'smartyCityAjax',
             [
-                'ajaxUrl' => admin_url('admin-ajax.php'),
-                'country'  => $country,
-                'nonce'    => wp_create_nonce('smarty_ca_nonce'),
+                'ajaxUrl'       => admin_url('admin-ajax.php'),
+                'country'       => $country,
+                'nonce'         => wp_create_nonce('smarty_ca_nonce'),
+                'inputTooShort' => __('Please enter 2 or more characters', 'smarty-city-autocomplete'),
+                'searching'     => __('Searching…', 'smarty-city-autocomplete'),
+                'noResults'     => __('No results found', 'smarty-city-autocomplete'),
+                'loadingMore'   => __('Loading more results…', 'smarty-city-autocomplete'),
             ]
         );
     }
