@@ -75,6 +75,8 @@ if (!function_exists('smarty_ca_hidden_postcode_input')) {
     add_action('woocommerce_after_checkout_billing_form', 'smarty_ca_hidden_postcode_input');
 }
 
+
+
 // ==================== JS / ASSETS ==================== //
 
 if (!function_exists('smarty_ca_enqueue_admin_scripts')) {
@@ -166,7 +168,17 @@ if (!function_exists('smarty_ca_get_city_suggestions')) {
         }
 
         $filtered = array_filter($cities, function ($entry) use ($term) {
-            return strpos(mb_strtolower($entry['city']), mb_strtolower($term)) !== false;
+            $normalize = function ($string) {
+                // Convert to UTF-8 NFC form
+                $string = Normalizer::normalize($string, Normalizer::FORM_D);
+
+                // Remove diacritical marks using regex
+                $string = preg_replace('/[\p{Mn}]/u', '', $string);
+
+                return mb_strtolower($string);
+            };
+
+            return strpos($normalize($entry['city']), $normalize($term)) !== false;
         });
 
         wp_send_json(array_slice(array_values($filtered), 0, 10));
