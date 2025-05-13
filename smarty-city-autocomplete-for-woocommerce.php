@@ -19,6 +19,18 @@ if (!defined('WPINC')) {
 	die;
 }
 
+/**
+ * Symfony polyfill for Normalizer that mimics intl behavior:
+ * - Normalizes Unicode characters like ă, ș, î into plain ASCII (a, s, i).
+ * - Handles all European accents.
+ * - Makes searches accent-insensitive for users.
+ * 
+ * @since 1.0.1
+ */
+if (!class_exists('Normalizer')) {
+    require_once plugin_dir_path(__FILE__) . 'libs/Normalizer.php';
+}
+
 // ==================== FRONTEND FIELD OVERRIDE ==================== //
 
 if (!function_exists('smarty_ca_override_checkout_fields')) {
@@ -75,15 +87,24 @@ if (!function_exists('smarty_ca_hidden_postcode_input')) {
     add_action('woocommerce_after_checkout_billing_form', 'smarty_ca_hidden_postcode_input');
 }
 
-
-
 // ==================== JS / ASSETS ==================== //
 
 if (!function_exists('smarty_ca_enqueue_admin_scripts')) {
+    /**
+     * Enqueue admin-specific styles and scripts for the City Autocomplete plugin.
+     *
+     * This function enqueues the admin CSS and JS files only for admin pages.
+     * It also localizes the JS script with nonce and AJAX URL.
+     *
+     * @since 1.0.0
+     *
+     * @param string $hook The current admin page hook suffix.
+     * @return void
+     */
     function smarty_ca_enqueue_admin_scripts($hook) {
      
         wp_enqueue_style('smarty-ca-admin-css', plugin_dir_url(__FILE__) . 'css/smarty-ca-admin.css', array(), '1.0.0');
-        wp_enqueue_script('smarty-ca-admin-js', plugin_dir_url(__FILE__) . 'js/smarty-ca-admin.js', ['jquery'], '1.0.0', true);
+        wp_enqueue_script('smarty-ca-admin-js', plugin_dir_url(__FILE__) . 'js/smarty-ca-admin.js', array('jquery'), '1.0.0', true);
 
         wp_localize_script(
             'smarty-ca-admin-js',
@@ -98,6 +119,16 @@ if (!function_exists('smarty_ca_enqueue_admin_scripts')) {
 }
 
 if (!function_exists('smarty_ca_enqueue_public_scripts')) {
+    /**
+     * Enqueue public-facing scripts and styles for the City Autocomplete plugin on the WooCommerce checkout page.
+     *
+     * This function only runs on the checkout page and only for enabled countries.
+     * It enqueues Select2 library, the plugin's main JS, and localizes strings for use in Select2 UI.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
     function smarty_ca_enqueue_public_scripts() {
         if (!is_checkout()) return;
 
@@ -106,9 +137,9 @@ if (!function_exists('smarty_ca_enqueue_public_scripts')) {
         if (!in_array($country, $enabled)) return;
 
         wp_enqueue_style('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css');
-        wp_enqueue_script('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js', ['jquery'], '4.1.0', true);
+        wp_enqueue_script('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js', array('jquery'), '4.1.0', true);
 
-        wp_enqueue_script('smarty-ca-public-js', plugin_dir_url(__FILE__) . 'js/smarty-ca-public.js', ['jquery', 'select2'], '1.1', true);
+        wp_enqueue_script('smarty-ca-public-js', plugin_dir_url(__FILE__) . 'js/smarty-ca-public.js', array('jquery', 'select2'), '1.1', true);
 
        wp_localize_script(
             'smarty-ca-public-js',
@@ -334,6 +365,16 @@ if (!function_exists('smarty_ca_register_settings')) {
 }
 
 if (!function_exists('smarty_ca_get_enabled_countries')) {
+    /**
+     * Retrieve the list of enabled countries for the City Autocomplete feature.
+     *
+     * This function fetches the list of country codes selected in the plugin settings.
+     * It ensures the returned value is always an array, even if the setting is empty.
+     *
+     * @since 1.0.0
+     *
+     * @return array Array of enabled country codes (e.g., ['BG', 'DE']).
+     */
     function smarty_ca_get_enabled_countries() {
         $enabled = get_option('smarty_ca_enabled_countries');
         return is_array($enabled) ? $enabled : [];
@@ -341,6 +382,17 @@ if (!function_exists('smarty_ca_get_enabled_countries')) {
 }
 
 if (!function_exists('smarty_ca_city_priority_input')) {
+    /**
+     * Render the City Field Priority input in the settings page.
+     *
+     * This function outputs an HTML <input> element for administrators
+     * to set the field priority (ordering) of the city field on checkout.
+     * The value is sanitized and limited between 0 and 999.
+     *
+     * @since 1.0.0
+     *
+     * @return void
+     */
     function smarty_ca_city_priority_input() {
         $value = get_option('smarty_ca_city_priority', 45);
         echo "<input type='number' name='smarty_ca_city_priority' value='" . esc_attr($value) . "' min='0' max='999' />";
