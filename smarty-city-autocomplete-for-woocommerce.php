@@ -335,7 +335,12 @@ if (!function_exists('smarty_ca_register_settings')) {
      * Register plugin settings.
      */
     function smarty_ca_register_settings() {
-        register_setting('smarty_ca_options', 'smarty_ca_enabled_countries');
+        register_setting('smarty_ca_options', 'smarty_ca_enabled_countries', [
+            'type' => 'array',
+            'sanitize_callback' => function($val) {
+                return is_array($val) ? array_map('sanitize_text_field', $val) : [];
+            },
+        ]);
         register_setting('smarty_ca_options', 'smarty_ca_city_priority', [
             'type' => 'integer',
             'sanitize_callback' => function($val) {
@@ -417,6 +422,7 @@ if (!function_exists('smarty_ca_country_checkboxes')) {
             $code = strtoupper(basename($file, '.txt'));
             $checked = in_array($code, $enabled) ? 'checked' : '';
             echo "<label><input type='checkbox' name='smarty_ca_enabled_countries[]' value='$code' $checked> $code</label><br>";
+            echo '<input type="hidden" name="smarty_ca_enabled_countries[]" value="" />';
         }
     }
 }
