@@ -57,11 +57,14 @@ if (!function_exists('smarty_ca_override_checkout_fields')) {
         $fields['billing']['billing_postcode']['class'][] = 'smarty-hidden';
 
         $fields['billing']['billing_city'] = array(
-            'type'      => 'select',
-            'label'     => __('City', 'woocommerce'),
-            'required'  => true,
-            'class'     => array('form-row-wide', 'smarty-select2-city'),
-            'options'   => array('' => __('', 'woocommerce')),
+            'type'              => 'select',
+            'label'             => get_option('smarty_ca_hide_city_label') === 'yes' ? '' : __('City', 'woocommerce'),
+            'required'          => true,
+            'class'             => array('form-row-wide', 'smarty-select2-city'),
+            'options'           => array( '' => '' ),
+            'custom_attributes' => array(
+                'data-placeholder'  => __('Start typing to search for a city', 'smarty-city-autocomplete'),
+            ),
             'priority'  => (int) $priority,
         );
 
@@ -137,8 +140,12 @@ if (!function_exists('smarty_ca_enqueue_public_scripts')) {
         if (!in_array($country, $enabled)) return;
 
         wp_enqueue_style('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css');
+        
+        if (get_option('smarty_ca_enable_custom_css', 'yes') === 'yes') {
+            wp_enqueue_style('smarty-ca-public-css', plugin_dir_url(__FILE__) . 'css/smarty-ca-public.css', array(), '1.0.0');
+        }
+        
         wp_enqueue_script('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js', array('jquery'), '4.1.0', true);
-
         wp_enqueue_script('smarty-ca-public-js', plugin_dir_url(__FILE__) . 'js/smarty-ca-public.js', array('jquery', 'select2'), '1.1', true);
 
        wp_localize_script(
@@ -347,6 +354,18 @@ if (!function_exists('smarty_ca_register_settings')) {
                 return max(0, min(999, (int)$val));
             },
         ]);
+        register_setting('smarty_ca_options', 'smarty_ca_hide_city_label', [
+            'type' => 'string',
+            'sanitize_callback' => function($val) {
+                return $val === 'yes' ? 'yes' : 'no';
+            },
+        ]);
+        register_setting('smarty_ca_options', 'smarty_ca_enable_custom_css', [
+            'type' => 'string',
+            'sanitize_callback' => function($val) {
+                return $val === 'yes' ? 'yes' : 'no';
+            },
+        ]);
 
         add_settings_section('smarty_ca_main_section', '', null, 'smarty-ca-settings');
 
@@ -362,6 +381,22 @@ if (!function_exists('smarty_ca_register_settings')) {
             'smarty_ca_city_priority',
             __('City Field Priority', 'smarty-city-autocomplete'),
             'smarty_ca_city_priority_input',
+            'smarty-ca-settings',
+            'smarty_ca_main_section'
+        );
+
+        add_settings_field(
+            'smarty_ca_hide_city_label',
+            __('Hide City Field Label', 'smarty-city-autocomplete'),
+            'smarty_ca_hide_city_label_checkbox',
+            'smarty-ca-settings',
+            'smarty_ca_main_section'
+        );
+
+        add_settings_field(
+            'smarty_ca_enable_custom_css',
+            __('Enable Custom CSS for City Dropdown', 'smarty-city-autocomplete'),
+            'smarty_ca_custom_css_checkbox',
             'smarty-ca-settings',
             'smarty_ca_main_section'
         );
@@ -403,6 +438,19 @@ if (!function_exists('smarty_ca_city_priority_input')) {
         echo "<input type='number' name='smarty_ca_city_priority' value='" . esc_attr($value) . "' min='0' max='999' />";
         echo "<p class='description'>" . __('Lower numbers show earlier. Default: 45', 'smarty-city-autocomplete') . "</p>";
     }
+}
+
+function smarty_ca_hide_city_label_checkbox() {
+    $value = get_option('smarty_ca_hide_city_label', 'no');
+    $checked = $value === 'yes' ? 'checked' : '';
+    echo "<label><input type='checkbox' name='smarty_ca_hide_city_label' value='yes' $checked> " . __('Yes, hide the city field label', 'smarty-city-autocomplete') . "</label>";
+}
+
+function smarty_ca_custom_css_checkbox() {
+    $value = get_option('smarty_ca_enable_custom_css', 'yes');
+    $checked = $value === 'yes' ? 'checked' : '';
+    echo "<label><input type='checkbox' name='smarty_ca_enable_custom_css' value='yes' $checked> ";
+    echo __('Yes, load the plugin’s public CSS styling', 'smarty-city-autocomplete') . "</label>";
 }
 
 if (!function_exists('smarty_ca_country_checkboxes')) {

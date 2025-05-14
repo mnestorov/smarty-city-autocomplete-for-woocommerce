@@ -5,7 +5,8 @@ jQuery(function($) {
     if (!$select.length) return;
 
     $select.select2({
-        placeholder: "",
+        placeholder: $select.data('placeholder'),
+        allowClear: false,
         minimumInputLength: 2,
         width: '100%',
         language: {
