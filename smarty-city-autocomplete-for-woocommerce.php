@@ -3,7 +3,7 @@
  * Plugin Name:             SM - City Autocomplete for WooCommerce
  * Plugin URI:              https://github.com/mnestorov/smarty-city-autocomplete-for-woocommerce
  * Description:             Replaces the WooCommerce city field with autocomplete and auto-fills postcode from a GeoNames TXT file.
- * Version:                 1.0.0
+ * Version:                 1.0.1
  * Author:                  Martin Nestorov
  * Author URI:              https://github.com/mnestorov
  * License:                 GPL-2.0+
@@ -20,12 +20,47 @@ if (!defined('WPINC')) {
 }
 
 /**
+ * On plugin activation: pre-warm the city cache for every country file in /data.
+ *
+ * Rationale
+ * ------------------------------------------------------------------
+ * - Parsing the large GeoNames TXT files on the first AJAX request
+ *   adds a noticeable delay for the first customer.  
+ * - By filling the transients here we do the heavy work exactly once,
+ *   during activation (or update), instead of in the middle of checkout.
+ *
+ * How it works
+ * ------------------------------------------------------------------
+ * 1. `glob()` finds every  <plugin>/data/XX.txt  file that ships
+ *    with the plugin (where XX is the ISO-3166-1 alpha-2 code).  
+ * 2. For each file we call  smarty_ca_build_city_transient( 'XX' )
+ *    which parses the file and stores the result in the transient
+ *    `smarty_ca_cities_XX` (TTL is set inside that helper).
+ * 3. Subsequent AJAX calls hit the ready-made transient, so the
+ *    first keystroke is instant.
+ *
+ * @internal  Runs automatically once on activation / update.  No hooks
+ *            or filters inside the closure to keep scope clean.
+ * 
+ * @since 1.0.0
+ */
+register_activation_hook(__FILE__, function() {
+    // build transients for all TXT files you actually ship
+    $files = glob(plugin_dir_path(__FILE__) . 'data/*.txt');
+
+    foreach ($files as $file) {
+        $country = strtoupper(basename($file, '.txt'));
+        smarty_ca_build_city_transient($country);
+    }
+});
+
+/**
  * Symfony polyfill for Normalizer that mimics intl behavior:
  * - Normalizes Unicode characters like ă, ș, î into plain ASCII (a, s, i).
  * - Handles all European accents.
  * - Makes searches accent-insensitive for users.
  * 
- * @since 1.0.1
+ * @since 1.0.0
  */
 if (!class_exists('Normalizer')) {
     require_once plugin_dir_path(__FILE__) . 'libs/Normalizer.php';
@@ -40,6 +75,7 @@ if (!function_exists('smarty_ca_override_checkout_fields')) {
      * - Replace the city field with an autocomplete text input
      *
      * @since 1.0.0
+     * 
      * @param array $fields WooCommerce checkout fields.
      * @return array Modified checkout fields.
      */
@@ -82,6 +118,7 @@ if (!function_exists('smarty_ca_hidden_postcode_input')) {
      * Output inline CSS to hide postcode field via the "smarty-hidden" class.
      *
      * @since 1.0.0
+     * 
      * @return void
      */
     function smarty_ca_hidden_postcode_input() {
@@ -165,6 +202,42 @@ if (!function_exists('smarty_ca_enqueue_public_scripts')) {
     add_action('wp_enqueue_scripts', 'smarty_ca_enqueue_public_scripts');
 }
 
+// ==================== TRANSIENT ==================== //
+
+if (!function_exists('smarty_ca_build_city_transient')) {
+    /**
+     * Build & store the transient for a given country code.
+     * 
+     * @since 1.0.1
+     * 
+     * @param string $country ISO 3166-1 alpha-2 – e.g. BG, RO.
+     * @return void
+     */
+    function smarty_ca_build_city_transient($country) {
+
+        $file_path = plugin_dir_path(__FILE__) . "data/$country.txt";
+        if (!file_exists($file_path)) {
+            return;
+        }
+
+        $cities = [];
+        if ($h = fopen($file_path, 'r')) {
+            while (($line = fgets($h)) !== false) {
+                $parts = explode("\t", $line);
+                if (count($parts) < 3) {
+                    continue;
+                }
+                $cities[] = [
+                    'city'        => trim($parts[2]),
+                    'postal_code' => $parts[1],
+                ];
+            }
+            fclose($h);
+        }
+        set_transient("smarty_ca_cities_$country", $cities, WEEK_IN_SECONDS);
+    }
+}
+
 // ==================== AJAX ==================== //
 
 if (!function_exists('smarty_ca_get_city_suggestions')) {
@@ -173,6 +246,7 @@ if (!function_exists('smarty_ca_get_city_suggestions')) {
      * Returns a list of matching cities and their postal codes.
      *
      * @since 1.0.0
+     * 
      * @return void JSON response.
      */
     function smarty_ca_get_city_suggestions() {
@@ -189,20 +263,10 @@ if (!function_exists('smarty_ca_get_city_suggestions')) {
 
         $cache_key = 'smarty_ca_cities_' . $country;
         $cities = get_transient($cache_key);
-
+        
         if ($cities === false) {
-            $cities = [];
-            $handle = fopen($file_path, 'r');
-            if ($handle) {
-                while (($line = fgets($handle)) !== false) {
-                    $parts = explode("\t", $line);
-                    if (count($parts) < 3) continue;
-                    [$cc, $zip, $city] = [$parts[0], $parts[1], $parts[2]];
-                    $cities[] = ['city' => trim($city), 'postal_code' => $zip];
-                }
-                fclose($handle);
-                set_transient($cache_key, $cities, DAY_IN_SECONDS);
-            }
+            smarty_ca_build_city_transient($country);     // fills the cache
+            $cities = get_transient($cache_key);          // now it exists
         }
 
         $filtered = array_filter($cities, function ($entry) use ($term) {
@@ -219,7 +283,8 @@ if (!function_exists('smarty_ca_get_city_suggestions')) {
             return strpos($normalize($entry['city']), $normalize($term)) !== false;
         });
 
-        wp_send_json(array_slice(array_values($filtered), 0, 10));
+        //wp_send_json(array_slice(array_values($filtered), 0, 10));
+        wp_send_json(array_values($filtered)); // send every match, no cap
     }
     add_action('wp_ajax_smarty_get_city_suggestions', 'smarty_ca_get_city_suggestions');
     add_action('wp_ajax_nopriv_smarty_get_city_suggestions', 'smarty_ca_get_city_suggestions');
@@ -230,6 +295,8 @@ if (!function_exists('smarty_ca_get_city_suggestions')) {
 /**
  * Clean city name before saving to the order.
  *
+ * @since 1.0.0
+ * 
  * @param string $city
  * @return string
  */
@@ -240,6 +307,17 @@ function smarty_ca_clean_city_on_checkout($city) {
     return trim($city);
 }
 
+/**
+ * Save *clean* billing / shipping city names into the Order object.
+ *
+ * Hook: woocommerce_checkout_create_order  
+ * Runs *before* WC writes the order to the DB (priority 20, two args).
+ *
+ * @since 1.0.0
+ * 
+ * @param WC_Order        $order Order being created.
+ * @param array<string,mixed> $data  Raw posted checkout data.
+ */
 add_action('woocommerce_checkout_create_order', function($order, $data) {
     if (!empty($data['billing']['billing_city'])) {
         $order->set_billing_city(smarty_ca_clean_city_on_checkout($data['billing']['billing_city']));
@@ -249,6 +327,17 @@ add_action('woocommerce_checkout_create_order', function($order, $data) {
     }
 }, 20, 2);
 
+/**
+ * Filter the formatted **billing** address before display / e-mails.
+ *
+ * Ensures the “ / Latin” part is stripped even if legacy data is present.
+ *
+ * @since 1.0.0
+ * 
+ * @param array<string,string> $address Formatted address parts.
+ * @param WC_Order             $order   Order object.
+ * @return array<string,string> Modified address parts.
+ */
 add_filter('woocommerce_order_formatted_billing_address', function($address, $order) {
     if (!empty($address['city'])) {
         $address['city'] = smarty_ca_clean_city_on_checkout($address['city']);
@@ -256,6 +345,13 @@ add_filter('woocommerce_order_formatted_billing_address', function($address, $or
     return $address;
 }, 10, 2);
 
+/**
+ * Same cleanup for the **shipping** address.
+ *
+ * @since 1.0.0
+ * 
+ * @see woocommerce_order_formatted_billing_address filter above.
+ */
 add_filter('woocommerce_order_formatted_shipping_address', function($address, $order) {
     if (!empty($address['city'])) {
         $address['city'] = smarty_ca_clean_city_on_checkout($address['city']);
@@ -266,6 +362,8 @@ add_filter('woocommerce_order_formatted_shipping_address', function($address, $o
 /**
  * Force-clean the city fields before they are saved into order meta.
  *
+ * @since 1.0.0
+ * 
  * @param int $order_id
  */
 add_action('woocommerce_checkout_update_order_meta', function($order_id) {
@@ -288,6 +386,20 @@ add_action('woocommerce_checkout_update_order_meta', function($order_id) {
 add_filter('woocommerce_process_checkout_field_billing_city', 'smarty_ca_clean_city_on_checkout');
 add_filter('woocommerce_process_checkout_field_shipping_city', 'smarty_ca_clean_city_on_checkout');
 
+/**
+ * Clean the raw checkout payload **before** WooCommerce persists it.
+ *
+ * Strips the “ / LatinName” part from both billing_city and
+ * shipping_city so no mixed-language values reach the DB.
+ *
+ * Hook: `woocommerce_checkout_posted_data`
+ *
+ * @since 1.0.0
+ * 
+ * @param array<string,mixed> $data Posted checkout data.
+ * @return array<string,mixed>       Sanitised data.
+ *
+ */
 add_filter('woocommerce_checkout_posted_data', function($data) {
     if (!empty($data['billing_city'])) {
         $data['billing_city'] = smarty_ca_clean_city_on_checkout($data['billing_city']);
@@ -304,6 +416,8 @@ add_filter('woocommerce_checkout_posted_data', function($data) {
  * Final cleanup after WooCommerce saves the meta.
  * This ensures / translations are removed from DB after save.
  *
+ * @since 1.0.0
+ * 
  * @param int $order_id
  */
 add_action('woocommerce_checkout_order_processed', function($order_id) {
@@ -323,6 +437,8 @@ add_action('woocommerce_checkout_order_processed', function($order_id) {
 if (!function_exists('smarty_ca_register_menu')) {
     /**
      * Add admin menu item under WooCommerce.
+     * 
+     * @since 1.0.0
      */
     function smarty_ca_register_menu() {
         add_submenu_page(
@@ -339,7 +455,15 @@ if (!function_exists('smarty_ca_register_menu')) {
 
 if (!function_exists('smarty_ca_register_settings')) {
     /**
-     * Register plugin settings.
+     * Register all plugin options with the WordPress Settings API.
+     *
+     * Creates four options in the `smarty_ca_options` group:
+     * – enabled countries<br>
+     * – city field priority<br>
+     * – hide city label<br>
+     * – enable custom CSS
+     *
+     * @since 1.0.0
      */
     function smarty_ca_register_settings() {
         register_setting('smarty_ca_options', 'smarty_ca_enabled_countries', [
@@ -440,22 +564,42 @@ if (!function_exists('smarty_ca_city_priority_input')) {
     }
 }
 
-function smarty_ca_hide_city_label_checkbox() {
-    $value = get_option('smarty_ca_hide_city_label', 'no');
-    $checked = $value === 'yes' ? 'checked' : '';
-    echo "<label><input type='checkbox' name='smarty_ca_hide_city_label' value='yes' $checked> " . __('Yes, hide the city field label', 'smarty-city-autocomplete') . "</label>";
+if (!function_exists('smarty_ca_hide_city_label_checkbox')) {
+    /**
+     * Checkbox: hide the “City” label on the checkout form.
+     *
+     * @since 1.0.0
+     */
+    function smarty_ca_hide_city_label_checkbox() {
+        $value = get_option('smarty_ca_hide_city_label', 'no');
+        $checked = $value === 'yes' ? 'checked' : '';
+        echo "<label><input type='checkbox' name='smarty_ca_hide_city_label' value='yes' $checked> " . __('Yes, hide the city field label', 'smarty-city-autocomplete') . "</label>";
+    }
 }
 
-function smarty_ca_custom_css_checkbox() {
-    $value = get_option('smarty_ca_enable_custom_css', 'yes');
-    $checked = $value === 'yes' ? 'checked' : '';
-    echo "<label><input type='checkbox' name='smarty_ca_enable_custom_css' value='yes' $checked> ";
-    echo __('Yes, load the plugin’s public CSS styling', 'smarty-city-autocomplete') . "</label>";
+if (!function_exists('smarty_ca_custom_css_checkbox')) {
+    /**
+     * Checkbox: load / skip the plugin’s public-facing CSS.
+     *
+     * Lets merchants keep their own theme styling.
+     *
+     * @since 1.0.0
+     */
+    function smarty_ca_custom_css_checkbox() {
+        $value = get_option('smarty_ca_enable_custom_css', 'yes');
+        $checked = $value === 'yes' ? 'checked' : '';
+        echo "<label><input type='checkbox' name='smarty_ca_enable_custom_css' value='yes' $checked> ";
+        echo __('Yes, load the plugin’s public CSS styling', 'smarty-city-autocomplete') . "</label>";
+    }
 }
 
 if (!function_exists('smarty_ca_country_checkboxes')) {
     /**
-     * Render checkboxes for each TXT file in /data.
+     * Output one checkbox per TXT file found in /data.
+     *
+     * Allows the admin to enable/disable the autocomplete per country.
+     *
+     * @since 1.0.0
      */
     function smarty_ca_country_checkboxes() {
         $enabled = smarty_ca_get_enabled_countries();
@@ -477,7 +621,9 @@ if (!function_exists('smarty_ca_country_checkboxes')) {
 
 if (!function_exists('smarty_ca_render_settings_page')) {
     /**
-     * Render the settings page.
+     * Render the settings screen wrapper and tab layout.
+     *
+     * @since 1.0.0
      */
     function smarty_ca_render_settings_page() {
         ?>
@@ -527,7 +673,11 @@ if (!function_exists('smarty_ca_render_settings_page')) {
 
 if (!function_exists('smarty_ca_load_readme')) {
     /**
-     * AJAX handler to load and parse the README.md content.
+     * AJAX: return the parsed **README.md** as HTML for the Documentation tab.
+     *
+     * Permission: `manage_options` • Nonce: `smarty_ca_nonce`
+     *
+     * @since 1.0.0
      */
     function smarty_ca_load_readme() {
         check_ajax_referer('smarty_ca_nonce', 'nonce');
@@ -560,7 +710,11 @@ if (!function_exists('smarty_ca_load_readme')) {
 
 if (!function_exists('smarty_ca_load_changelog')) {
     /**
-     * AJAX handler to load and parse the CHANGELOG.md content.
+     * AJAX: return the parsed **CHANGELOG.md** as HTML for the Changelog tab.
+     *
+     * Permission and nonce identical to `smarty_ca_load_readme()`.
+     *
+     * @since 1.0.0
      */
     function smarty_ca_load_changelog() {
         check_ajax_referer('smarty_ca_nonce', 'nonce');
