@@ -3,7 +3,7 @@
  * Plugin Name:             SM - City Autocomplete for WooCommerce
  * Plugin URI:              https://github.com/mnestorov/smarty-city-autocomplete-for-woocommerce
  * Description:             Replaces the WooCommerce city field with autocomplete and auto-fills postcode from a GeoNames TXT file.
- * Version:                 1.0.1
+ * Version:                 1.0.2
  * Author:                  Martin Nestorov
  * Author URI:              https://github.com/mnestorov
  * License:                 GPL-2.0+
@@ -185,7 +185,7 @@ if (!function_exists('smarty_ca_enqueue_public_scripts')) {
         wp_enqueue_script('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js', array('jquery'), '4.1.0', true);
         wp_enqueue_script('smarty-ca-public-js', plugin_dir_url(__FILE__) . 'js/smarty-ca-public.js', array('jquery', 'select2'), '1.1', true);
 
-       wp_localize_script(
+        wp_localize_script(
             'smarty-ca-public-js',
             'smartyCityAjax',
             [
@@ -234,7 +234,9 @@ if (!function_exists('smarty_ca_build_city_transient')) {
             }
             fclose($h);
         }
-        set_transient("smarty_ca_cities_$country", $cities, WEEK_IN_SECONDS);
+
+        $ttl = get_option('smarty_ca_cache_duration', WEEK_IN_SECONDS);
+        set_transient("smarty_ca_cities_$country", $cities, $ttl);
     }
 }
 
@@ -467,27 +469,33 @@ if (!function_exists('smarty_ca_register_settings')) {
      */
     function smarty_ca_register_settings() {
         register_setting('smarty_ca_options', 'smarty_ca_enabled_countries', [
-            'type' => 'array',
+            'type'              => 'array',
             'sanitize_callback' => function($val) {
                 return is_array($val) ? array_map('sanitize_text_field', $val) : [];
             },
         ]);
         register_setting('smarty_ca_options', 'smarty_ca_city_priority', [
-            'type' => 'integer',
+            'type'              => 'integer',
             'sanitize_callback' => function($val) {
                 return max(0, min(999, (int)$val));
             },
         ]);
         register_setting('smarty_ca_options', 'smarty_ca_hide_city_label', [
-            'type' => 'string',
+            'type'              => 'string',
             'sanitize_callback' => function($val) {
                 return $val === 'yes' ? 'yes' : 'no';
             },
         ]);
         register_setting('smarty_ca_options', 'smarty_ca_enable_custom_css', [
-            'type' => 'string',
+            'type'              => 'string',
             'sanitize_callback' => function($val) {
                 return $val === 'yes' ? 'yes' : 'no';
+            },
+        ]);
+        register_setting('smarty_ca_options', 'smarty_ca_cache_duration', [
+            'type'              => 'integer',
+            'sanitize_callback' => function($val) {
+                return (int) $val;
             },
         ]);
 
@@ -496,7 +504,7 @@ if (!function_exists('smarty_ca_register_settings')) {
         add_settings_field(
             'smarty_ca_enabled_countries',
             __('Enabled Countries', 'smarty-city-autocomplete'),
-            'smarty_ca_country_checkboxes',
+            'smarty_ca_country_checkboxes_cb',
             'smarty-ca-settings',
             'smarty_ca_main_section'
         );
@@ -504,7 +512,7 @@ if (!function_exists('smarty_ca_register_settings')) {
         add_settings_field(
             'smarty_ca_city_priority',
             __('City Field Priority', 'smarty-city-autocomplete'),
-            'smarty_ca_city_priority_input',
+            'smarty_ca_city_priority_input_cb',
             'smarty-ca-settings',
             'smarty_ca_main_section'
         );
@@ -512,7 +520,7 @@ if (!function_exists('smarty_ca_register_settings')) {
         add_settings_field(
             'smarty_ca_hide_city_label',
             __('Hide City Field Label', 'smarty-city-autocomplete'),
-            'smarty_ca_hide_city_label_checkbox',
+            'smarty_ca_hide_city_label_checkbox_cb',
             'smarty-ca-settings',
             'smarty_ca_main_section'
         );
@@ -520,7 +528,15 @@ if (!function_exists('smarty_ca_register_settings')) {
         add_settings_field(
             'smarty_ca_enable_custom_css',
             __('Enable Custom CSS for City Dropdown', 'smarty-city-autocomplete'),
-            'smarty_ca_custom_css_checkbox',
+            'smarty_ca_custom_css_checkbox_cb',
+            'smarty-ca-settings',
+            'smarty_ca_main_section'
+        );
+
+        add_settings_field(
+            'smarty_ca_cache_duration',
+            __('City Cache Duration', 'smarty-city-autocomplete'),
+            'smarty_ca_cache_duration_select_cb',
             'smarty-ca-settings',
             'smarty_ca_main_section'
         );
@@ -545,7 +561,7 @@ if (!function_exists('smarty_ca_get_enabled_countries')) {
     }
 }
 
-if (!function_exists('smarty_ca_city_priority_input')) {
+if (!function_exists('smarty_ca_city_priority_input_cb')) {
     /**
      * Render the City Field Priority input in the settings page.
      *
@@ -557,27 +573,27 @@ if (!function_exists('smarty_ca_city_priority_input')) {
      *
      * @return void
      */
-    function smarty_ca_city_priority_input() {
+    function smarty_ca_city_priority_input_cb() {
         $value = get_option('smarty_ca_city_priority', 45);
         echo "<input type='number' name='smarty_ca_city_priority' value='" . esc_attr($value) . "' min='0' max='999' />";
         echo "<p class='description'>" . __('Lower numbers show earlier. Default: 45', 'smarty-city-autocomplete') . "</p>";
     }
 }
 
-if (!function_exists('smarty_ca_hide_city_label_checkbox')) {
+if (!function_exists('smarty_ca_hide_city_label_checkbox_cb')) {
     /**
      * Checkbox: hide the “City” label on the checkout form.
      *
      * @since 1.0.0
      */
-    function smarty_ca_hide_city_label_checkbox() {
+    function smarty_ca_hide_city_label_checkbox_cb() {
         $value = get_option('smarty_ca_hide_city_label', 'no');
         $checked = $value === 'yes' ? 'checked' : '';
         echo "<label><input type='checkbox' name='smarty_ca_hide_city_label' value='yes' $checked> " . __('Yes, hide the city field label', 'smarty-city-autocomplete') . "</label>";
     }
 }
 
-if (!function_exists('smarty_ca_custom_css_checkbox')) {
+if (!function_exists('smarty_ca_custom_css_checkbox_cb')) {
     /**
      * Checkbox: load / skip the plugin’s public-facing CSS.
      *
@@ -585,7 +601,7 @@ if (!function_exists('smarty_ca_custom_css_checkbox')) {
      *
      * @since 1.0.0
      */
-    function smarty_ca_custom_css_checkbox() {
+    function smarty_ca_custom_css_checkbox_cb() {
         $value = get_option('smarty_ca_enable_custom_css', 'yes');
         $checked = $value === 'yes' ? 'checked' : '';
         echo "<label><input type='checkbox' name='smarty_ca_enable_custom_css' value='yes' $checked> ";
@@ -593,7 +609,7 @@ if (!function_exists('smarty_ca_custom_css_checkbox')) {
     }
 }
 
-if (!function_exists('smarty_ca_country_checkboxes')) {
+if (!function_exists('smarty_ca_country_checkboxes_cb')) {
     /**
      * Output one checkbox per TXT file found in /data.
      *
@@ -601,7 +617,7 @@ if (!function_exists('smarty_ca_country_checkboxes')) {
      *
      * @since 1.0.0
      */
-    function smarty_ca_country_checkboxes() {
+    function smarty_ca_country_checkboxes_cb() {
         $enabled = smarty_ca_get_enabled_countries();
         $files = glob(plugin_dir_path(__FILE__) . 'data/*.txt');
 
@@ -616,6 +632,46 @@ if (!function_exists('smarty_ca_country_checkboxes')) {
             echo "<label><input type='checkbox' name='smarty_ca_enabled_countries[]' value='$code' $checked> $code</label><br>";
             echo '<input type="hidden" name="smarty_ca_enabled_countries[]" value="" />';
         }
+    }
+}
+
+if (!function_exists('smarty_ca_cache_duration_select_cb')) {
+    /**
+     * Render the City Cache Duration <select> dropdown for the plugin settings.
+     *
+     * This function outputs a `<select>` field allowing the admin to choose how long
+     * the city list (loaded from the GeoNames .txt file) should be cached using transients.
+     *
+     * Available options include:
+     * - 1 Hour
+     * - 1 Day
+     * - 1 Week (default)
+     * - 1 Month (approx.)
+     *
+     * The selected value is stored in the `smarty_ca_cache_duration` option and used
+     * when building the transient via `set_transient()`.
+     *
+     * @since 1.0.2
+     *
+     * @return void
+     */
+    function smarty_ca_cache_duration_select_cb() {
+        $options = [
+            HOUR_IN_SECONDS     => __('1 Hour', 'smarty-city-autocomplete'),
+            DAY_IN_SECONDS      => __('1 Day', 'smarty-city-autocomplete'),
+            WEEK_IN_SECONDS     => __('1 Week', 'smarty-city-autocomplete'),
+            MONTH_IN_SECONDS    => __('1 Month (approx.)', 'smarty-city-autocomplete'),
+        ];
+
+        $selected = get_option('smarty_ca_cache_duration', WEEK_IN_SECONDS);
+
+        echo '<select name="smarty_ca_cache_duration">';
+        foreach ($options as $value => $label) {
+            $is_selected = selected($selected, $value, false);
+            echo "<option value='$value' $is_selected>$label</option>";
+        }
+        echo '</select>';
+        echo '<p class="description">' . __('Controls how long city data is cached for each country.', 'smarty-city-autocomplete') . '</p>';
     }
 }
 

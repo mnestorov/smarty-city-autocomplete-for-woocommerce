@@ -25,6 +25,7 @@ Developed for WooCommerce stores with multi-country or multilingual setups, it s
 - Stores only **clean native city names** in the WooCommerce order meta
 - Fully supports **multisite** and **multi-country** installations
 - Admin UI to enable/disable by country (based on `/data/*.txt` files)
+- Admin setting to control **city cache duration** (1 hour to 1 month)
 
 ## How It Works
 
@@ -35,6 +36,7 @@ Developed for WooCommerce stores with multi-country or multilingual setups, it s
    - The `billing_postcode` field is auto-filled.
    - The city label appears as `CityName [PostalCode]`.
    - Only the **native city name** (before ` / `) is saved in the order.
+4. Transients cache parsed city data per country – controlled via the new **cache duration** setting.   
 
 ## Installation
 
@@ -48,6 +50,21 @@ Developed for WooCommerce stores with multi-country or multilingual setups, it s
 4. **Configure**:
    - Go to **WooCommerce → City Autocomplete**.
    - Enable countries for which you’ve uploaded `data/XX.txt` files.
+   - Set your preferred **cache duration** from the dropdown.
+
+## Settings Options
+
+The plugin adds a settings screen under **WooCommerce > City Autocomplete**, where you can configure:
+
+- ✅ Enabled countries (based on available `*.txt` files in `/data/`)
+- 🎯 Priority of the city field (for checkout ordering)
+- 🏷️ Option to hide the city label (for compact layouts)
+- 🎨 Toggle for loading plugin CSS (for custom styling)
+- 🕒 **City Cache Duration** – how long parsed city data is cached:
+  - 1 Hour
+  - 1 Day
+  - 1 Week _(default)_
+  - 1 Month   
 
 ## Data File Format
 
